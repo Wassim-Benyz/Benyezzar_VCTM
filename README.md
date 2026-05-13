@@ -5,6 +5,10 @@ A voice-first task manager built for fast, natural task capture and agenda revie
 The app is intentionally lightweight: tasks and demo authentication are stored locally in the browser, while AI parsing and premium voice output are handled through secure server-side API endpoints.
 
 
+## Video Demo
+
+https://drive.google.com/file/d/1IQxvJkWU9ddRvfm9TL8fvgAS5YZIs6z_/view?usp=drive_link
+
 ## Live Demo
 
 https://benyezzar-vctm.vercel.app/
