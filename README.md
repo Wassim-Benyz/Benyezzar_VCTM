@@ -4,6 +4,15 @@ A voice-first task manager built for fast, natural task capture and agenda revie
 
 The app is intentionally lightweight: tasks and demo authentication are stored locally in the browser, while AI parsing and premium voice output are handled through secure server-side API endpoints.
 
+
+## Live Demo
+
+https://benyezzar-vctm.vercel.app/
+
+## Github Repo
+
+https://github.com/Wassim-Benyz/Benyezzar_VCTM.git
+
 ## Key Features
 
 - Voice-first task creation, reading, updating, and deletion
@@ -12,8 +21,8 @@ The app is intentionally lightweight: tasks and demo authentication are stored l
 - Delete single, multiple, or filtered groups of tasks with confirmation
 - Semantic task matching for common phrases such as workout, LinkedIn post, meeting, sync, and call
 - Conversational assistant responses with task details
-- Interruption-friendly audio: start listening again while the assistant is speaking
-- Optional premium TTS with Cartesia Sonic
+- assistant supports interruption-aware conversations, allowing users to speak again while audio playback is still active.
+- Realistic low-latency TTS powered by Cartesia Sonic
 - Browser SpeechSynthesis fallback when premium TTS is unavailable
 - Demo localStorage authentication with signup, login, session, and logout
 - Fully local task persistence using localStorage
@@ -172,7 +181,7 @@ Thanks
 
 ## Screenshots
 
-Add screenshots or product mockups here:
+
 
 ```text
 docs/screenshots/login.png
@@ -212,10 +221,15 @@ If deploying to a static-only host, provide equivalent backend/serverless endpoi
 - Expanded semantic task matching
 - End-to-end and voice workflow tests
 
+## Important 
+
+If external AI/TTS services become unavailable or hit quota limits,
+the application gracefully falls back to local parsing and browser speech synthesis.
+
 ## Author
 
-Built by Wassim for Benyezzar VC.
+Built by Ouassim Benyezzar.
 
 ---
 
-Benyezzar VC Task Manager is a demo-quality voice productivity experience. It is designed to showcase fast iteration, AI-assisted task workflows, and a polished hands-free interface.
+Benyezzar VC Task Manager is a AI-powered voice productivity experience. It is designed to showcase fast iteration, AI-assisted task workflows, and a polished hands-free interface.
