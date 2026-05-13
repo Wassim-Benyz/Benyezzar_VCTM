@@ -12,6 +12,7 @@ let voicesPromise = null
 let currentSpeakId = 0
 let currentAudio = null
 let currentAudioUrl = ''
+let currentAudioStopCallback = null
 let currentCartesiaRequest = null
 
 export function isSpeechSynthesisSupported() {
@@ -121,9 +122,23 @@ async function speakWithCartesia(text, speakId, { onEnd } = {}) {
   currentAudio = new Audio(currentAudioUrl)
 
   await new Promise((resolve, reject) => {
-    currentAudio.onended = resolve
-    currentAudio.onerror = reject
-    currentAudio.play().catch(reject)
+    const audio = currentAudio
+
+    currentAudioStopCallback = () => {
+      resolve()
+    }
+    audio.onended = () => {
+      currentAudioStopCallback = null
+      resolve()
+    }
+    audio.onerror = () => {
+      currentAudioStopCallback = null
+      reject(new Error('Cartesia audio playback failed.'))
+    }
+    audio.play().catch((error) => {
+      currentAudioStopCallback = null
+      reject(error)
+    })
   })
 
   if (speakId !== currentSpeakId) {
@@ -136,8 +151,13 @@ async function speakWithCartesia(text, speakId, { onEnd } = {}) {
 }
 
 function stopCurrentAudio() {
+  currentAudioStopCallback?.()
+  currentAudioStopCallback = null
+
   if (currentAudio) {
     currentAudio.pause()
+    currentAudio.onended = null
+    currentAudio.onerror = null
     currentAudio.src = ''
     currentAudio.load()
     currentAudio = null

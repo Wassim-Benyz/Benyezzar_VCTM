@@ -1,9 +1,14 @@
 const CREATE_MULTIPLE_TASKS_PATTERN =
   /^(create|add)\s+((multiple|two|three|four|five|\d+)\s+)?tasks\b\s*/i
-const CREATE_TASK_PATTERNS = [/^(create|add)\s+(a\s+)?task\s+/i]
+const CREATE_TASK_PATTERNS = [
+  /^(create|add)\s+(a\s+)?task\s+/i,
+  /^remind\s+me\s+to\s+/i,
+]
 const READ_TASKS_PATTERN = /^(show|read|list)(\s+me)?\s+(my\s+)?tasks$/i
 const READ_AGENDA_PATTERN =
   /^(what\s+(are|do)\s+.*|give\s+me\s+.*|show\s+.*|read\s+.*|list\s+.*)(tasks|agenda|have).*$/i
+const SMALL_TALK_PATTERN =
+  /^(hi|hello|hey|how are you|how are you doing|thank you|thanks|thanks a lot)$/i
 const DATE_FILTER_PATTERN = /\b(today'?s?|tomorrow)\b/i
 const TIME_OF_DAY_PATTERN = /\b(morning|afternoon|evening)\b/i
 const UPDATE_TASK_PATTERN =
@@ -21,6 +26,12 @@ export function parseVoiceCommand(transcript) {
 
   if (!text) {
     return unknownCommand('I did not hear a command.')
+  }
+
+  const smallTalkCommand = parseSmallTalk(text)
+
+  if (smallTalkCommand) {
+    return smallTalkCommand
   }
 
   const readCommand = parseReadTasks(text)
@@ -60,6 +71,19 @@ export function parseVoiceCommand(transcript) {
   }
 
   return unknownCommand()
+}
+
+function parseSmallTalk(text) {
+  if (!SMALL_TALK_PATTERN.test(text)) {
+    return null
+  }
+
+  return {
+    intent: 'SMALL_TALK',
+    payload: {
+      text,
+    },
+  }
 }
 
 function parseReadTasks(text) {

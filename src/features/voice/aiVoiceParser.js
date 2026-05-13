@@ -34,6 +34,7 @@ function isValidCommand(command) {
     'DELETE_TASK',
     'CREATE_MULTIPLE_TASKS',
     'DELETE_MULTIPLE_TASKS',
+    'SMALL_TALK',
     'UNKNOWN',
   ]
 

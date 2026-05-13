@@ -5,6 +5,7 @@ const VALID_INTENTS = new Set([
   'DELETE_TASK',
   'CREATE_MULTIPLE_TASKS',
   'DELETE_MULTIPLE_TASKS',
+  'SMALL_TALK',
   'UNKNOWN',
 ])
 
@@ -221,13 +222,15 @@ function createSystemPrompt() {
   return [
     'Convert voice transcripts into task manager commands.',
     'Return JSON only. Do not return markdown or explanations.',
-    'Valid intents: CREATE_TASK, READ_TASKS, UPDATE_TASK, DELETE_TASK, CREATE_MULTIPLE_TASKS, DELETE_MULTIPLE_TASKS, UNKNOWN.',
+    'Valid intents: CREATE_TASK, READ_TASKS, UPDATE_TASK, DELETE_TASK, CREATE_MULTIPLE_TASKS, DELETE_MULTIPLE_TASKS, SMALL_TALK, UNKNOWN.',
     'CREATE_TASK payload: { "title": string, "date": string, "time": string }.',
     'CREATE_MULTIPLE_TASKS payload: { "tasks": [{ "title": string, "date": string, "time": string }] }.',
     'READ_TASKS payload: { "dateFilter": "today" | "tomorrow" | "", "timeOfDay": "morning" | "afternoon" | "evening" | "" }.',
     'UPDATE_TASK payload: { "searchText": string, "updates": { "title"?: string, "date"?: string, "time"?: string, "status"?: string } }.',
     'DELETE_TASK payload: { "searchText": string }.',
     'DELETE_MULTIPLE_TASKS payload: { "taskNames": string[], "dateFilter": "today" | "tomorrow" | "", "deleteAll": boolean }.',
+    'SMALL_TALK payload: { "text": string }.',
+    'Use SMALL_TALK for short greetings and thanks like "hi", "hello", "how are you", "thank you", or "thanks". Do not create tasks for small talk.',
     'Use DELETE_MULTIPLE_TASKS when the user asks to delete, remove, or clear more than one named task, or all tasks.',
     'For delete all commands like "clear all tasks" or "delete all my tasks tomorrow", use taskNames: [], deleteAll: true, and preserve dateFilter when present.',
     'For multiple named delete commands like "delete gym and LinkedIn post", use taskNames with each requested task name and deleteAll: false.',

@@ -20,6 +20,8 @@ export function useVoiceRecognition({
   const shouldKeepListeningRef = useRef(false)
   const [transcript, setTranscript] = useState('')
   const [isListening, setIsListening] = useState(false)
+  const [isThinking, setIsThinking] = useState(false)
+  const [isSpeaking, setIsSpeaking] = useState(false)
   const isSupported = isSpeechRecognitionSupported()
   const [error, setError] = useState(() =>
     isSpeechRecognitionSupported()
@@ -47,6 +49,11 @@ export function useVoiceRecognition({
     }
   }, [])
 
+  const stopAssistantSpeech = useCallback(() => {
+    stopSpeaking()
+    setIsSpeaking(false)
+  }, [])
+
   useEffect(() => {
     if (!isSupported) {
       return undefined
@@ -58,6 +65,8 @@ export function useVoiceRecognition({
     recognition.onstart = () => {
       isRecognitionActiveRef.current = true
       setIsListening(true)
+      setIsThinking(false)
+      setIsSpeaking(false)
       setError('')
     }
 
@@ -86,6 +95,8 @@ export function useVoiceRecognition({
             onFinalTranscriptRef.current?.(spokenText) || `I heard: ${spokenText}`,
           token: responseToken,
         }
+        setIsThinking(true)
+        setIsSpeaking(false)
         recognition.stop()
       }
 
@@ -101,6 +112,8 @@ export function useVoiceRecognition({
       responseTokenRef.current = responseToken
 
       setError(errorMessage)
+      setIsThinking(false)
+      setIsSpeaking(false)
       pendingResponseRef.current = {
         response: assistantResponse,
         token: responseToken,
@@ -123,18 +136,24 @@ export function useVoiceRecognition({
               return
             }
 
+            setIsThinking(false)
+            setIsSpeaking(Boolean(responseText))
             speak(responseText, {
               onEnd: () => {
+                setIsSpeaking(false)
                 if (shouldKeepListeningRef.current) {
                   startRecognition()
                 }
               },
               onError: () => {
+                setIsSpeaking(false)
                 setError('Speech synthesis failed.')
               },
             })
           })
           .catch(() => {
+            setIsThinking(false)
+            setIsSpeaking(false)
             setError('Could not process voice command.')
 
             if (shouldKeepListeningRef.current) {
@@ -151,6 +170,9 @@ export function useVoiceRecognition({
 
     return () => {
       shouldKeepListeningRef.current = false
+      setIsThinking(false)
+      setIsSpeaking(false)
+      stopSpeaking()
       recognition.stop()
       recognitionRef.current = null
     }
@@ -164,15 +186,18 @@ export function useVoiceRecognition({
     shouldKeepListeningRef.current = true
     pendingResponseRef.current = ''
     responseTokenRef.current += 1
+    setIsThinking(false)
+    setIsSpeaking(false)
     setError('')
-    stopSpeaking()
+    stopAssistantSpeech()
     startRecognition()
-  }, [startRecognition])
+  }, [startRecognition, stopAssistantSpeech])
 
   const stopListening = useCallback(() => {
     shouldKeepListeningRef.current = false
     pendingResponseRef.current = ''
     responseTokenRef.current += 1
+    setIsThinking(false)
     recognitionRef.current?.stop()
   }, [])
 
@@ -181,17 +206,24 @@ export function useVoiceRecognition({
     pendingResponseRef.current = ''
     responseTokenRef.current += 1
     setTranscript('')
-    stopSpeaking()
-  }, [])
+    setIsThinking(false)
+    stopAssistantSpeech()
+  }, [stopAssistantSpeech])
+
+  const stopCurrentSpeaking = useCallback(() => {
+    stopAssistantSpeech()
+  }, [stopAssistantSpeech])
 
   return {
     transcript,
     isListening,
+    isThinking,
+    isSpeaking,
     isSupported,
     error,
     startListening,
     stopListening,
-    stopSpeaking,
+    stopSpeaking: stopCurrentSpeaking,
     resetTranscript,
   }
 }

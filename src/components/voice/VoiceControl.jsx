@@ -63,19 +63,24 @@ export function VoiceControl() {
         })
       }
 
-      refreshTasks()
+      if (command.intent === 'SMALL_TALK') {
+        response = createSmallTalkResponse(spokenText)
+        setAssistantMessage(response)
+        return response
+      }
 
       if (command.intent === 'CREATE_TASK') {
-        const task = addTask(command.payload)
+        const taskDetails = withDefaultDate(command.payload)
+        const task = addTask(taskDetails)
         updateConversationContext({ lastCreatedTask: task })
-        response = `Created task: ${task.title}.`
+        response = `Sure, I created your task: ${formatTaskDetails(task)}.`
         setAssistantMessage(response)
         return response
       }
 
       if (command.intent === 'CREATE_MULTIPLE_TASKS') {
         const createdTasks = command.payload.tasks.map((taskDetails) =>
-          addTask(taskDetails),
+          addTask(withDefaultDate(taskDetails)),
         )
 
         updateConversationContext({
@@ -83,7 +88,7 @@ export function VoiceControl() {
           lastReadResults: createdTasks,
         })
 
-        response = `I created ${createdTasks.length} tasks for you.`
+        response = createMultipleTasksResponse(createdTasks)
         setAssistantMessage(response)
         return response
       }
@@ -117,7 +122,8 @@ export function VoiceControl() {
         }
 
         const task = taskResult.task
-        const updatedTask = editTask(task.id, command.payload.updates)
+        const updates = withDefaultUpdateDate(command.payload.updates, task)
+        const updatedTask = editTask(task.id, updates)
         if (!updatedTask) {
           response = `I could not update ${task.title}.`
           setAssistantMessage(response)
@@ -125,7 +131,7 @@ export function VoiceControl() {
         }
 
         updateConversationContext({ lastUpdatedTask: updatedTask })
-        response = `Updated task: ${updatedTask.title}.`
+        response = createUpdateResponse(task, updates, updatedTask)
         setAssistantMessage(response)
         return response
       }
@@ -191,6 +197,8 @@ export function VoiceControl() {
   const {
     transcript,
     isListening,
+    isThinking,
+    isSpeaking,
     isSupported,
     error,
     startListening,
@@ -201,6 +209,7 @@ export function VoiceControl() {
     onFinalTranscript: handleFinalTranscript,
     onRecognitionError: handleRecognitionError,
   })
+  const voiceStatus = getVoiceStatus({ isListening, isThinking, isSpeaking })
 
   return (
     <main className="voice-dashboard">
@@ -215,7 +224,7 @@ export function VoiceControl() {
         </div>
 
         <div className="orb-stage">
-          <div className={`voice-orb ${isListening ? 'is-listening' : ''}`}>
+          <div className={`voice-orb ${voiceStatus.className}`}>
             <div className="sonic-ring ring-one"></div>
             <div className="sonic-ring ring-two"></div>
             <div className="waveform" aria-hidden="true">
@@ -241,8 +250,8 @@ export function VoiceControl() {
           </div>
 
           <div className="orb-status">
-            <span className={isListening ? 'status-dot active' : 'status-dot'}></span>
-            {isListening ? 'Listening' : 'Standby'}
+            <span className={`status-dot ${voiceStatus.className}`}></span>
+            {voiceStatus.label}
           </div>
         </div>
 
@@ -250,8 +259,17 @@ export function VoiceControl() {
           <button type="button" onClick={resetTranscript} disabled={!transcript}>
             Clear transcript
           </button>
-          <button type="button" onClick={stopSpeaking}>
-            Stop speaking
+          <button
+            type="button"
+            className="icon-control"
+            onClick={stopSpeaking}
+            aria-label="Stop speaking"
+            title="Stop speaking"
+          >
+            <svg viewBox="0 0 24 24" role="presentation" aria-hidden="true">
+              <path d="M4 9v6h4l5 4V5L8 9H4Z" />
+              <path d="m17 9 4 4m0-4-4 4" />
+            </svg>
           </button>
         </div>
 
@@ -314,6 +332,165 @@ function handleDeleteConfirmation({
   }
 
   return `Please say yes to delete ${task.title}, or no to cancel.`
+}
+
+function getVoiceStatus({ isListening, isThinking, isSpeaking }) {
+  if (isListening) {
+    return {
+      className: 'is-listening',
+      label: 'Listening...',
+    }
+  }
+
+  if (isThinking) {
+    return {
+      className: 'is-thinking',
+      label: 'Thinking...',
+    }
+  }
+
+  if (isSpeaking) {
+    return {
+      className: 'is-speaking',
+      label: 'Speaking...',
+    }
+  }
+
+  return {
+    className: 'is-idle',
+    label: 'Ready',
+  }
+}
+
+function createSmallTalkResponse(spokenText) {
+  const text = normalizeText(spokenText)
+
+  if (['thank you', 'thanks', 'thanks a lot'].includes(text)) {
+    return 'You are welcome.'
+  }
+
+  if (text.includes('how are you')) {
+    return 'I am doing well, thanks. Ready when you are.'
+  }
+
+  return 'Hi, I am ready when you are.'
+}
+
+function withDefaultDate(taskDetails = {}) {
+  return {
+    ...taskDetails,
+    date: taskDetails.date || 'today',
+  }
+}
+
+function withDefaultUpdateDate(updates = {}, task = {}) {
+  if (!updates.time || updates.date) {
+    return updates
+  }
+
+  return {
+    ...updates,
+    date: task.date || 'today',
+  }
+}
+
+function createUpdateResponse(previousTask, updates = {}, updatedTask) {
+  const titleChanged = Boolean(updates.title)
+  const scheduleChanged = Boolean(updates.date || updates.time)
+  const statusChanged = Boolean(updates.status)
+  const schedule = formatScheduleDestination(updates)
+
+  if (titleChanged && scheduleChanged) {
+    return `Done, I renamed ${previousTask.title} to ${updatedTask.title} and moved it to ${schedule}.`
+  }
+
+  if (titleChanged) {
+    return `Done, I renamed ${previousTask.title} to ${updatedTask.title}.`
+  }
+
+  if (scheduleChanged) {
+    return `Done, I moved ${previousTask.title} to ${schedule}.`
+  }
+
+  if (statusChanged) {
+    return `Done, I marked ${updatedTask.title} as ${updates.status}.`
+  }
+
+  return `Done, I updated ${updatedTask.title}.`
+}
+
+function createMultipleTasksResponse(tasks) {
+  const sharedDate = getSharedValue(tasks, 'date')
+  const taskSummaries = tasks.map((task) =>
+    formatTaskForCreatedList(task, { sharedDate }),
+  )
+  const header = `I created ${tasks.length} ${pluralizeTask(tasks.length)}${
+    sharedDate ? ` for ${sharedDate}` : ''
+  }:`
+
+  return `${header} ${joinWithAnd(taskSummaries)}.`
+}
+
+function formatTaskForCreatedList(task, { sharedDate = '' } = {}) {
+  const includeDate = !sharedDate
+
+  if (includeDate) {
+    return formatTaskDetails(task)
+  }
+
+  if (task.time) {
+    return `${task.title} at ${task.time}`
+  }
+
+  return task.title
+}
+
+function getSharedValue(items, key) {
+  if (items.length === 0) {
+    return ''
+  }
+
+  const firstValue = items[0][key] || ''
+
+  if (!firstValue) {
+    return ''
+  }
+
+  return items.every((item) => item[key] === firstValue) ? firstValue : ''
+}
+
+function formatTaskDetails(task) {
+  const schedule = formatTaskSchedule(task)
+
+  if (!schedule) {
+    return task.title
+  }
+
+  return `${task.title} ${schedule}`
+}
+
+function formatTaskSchedule(task) {
+  if (task.date && task.time) {
+    return `${task.date} at ${task.time}`
+  }
+
+  if (task.date) {
+    return task.date
+  }
+
+  if (task.time) {
+    return `at ${task.time}`
+  }
+
+  return ''
+}
+
+function formatScheduleDestination(updates = {}) {
+  if (updates.date && updates.time) {
+    return `${updates.date} at ${updates.time}`
+  }
+
+  return updates.date || updates.time || ''
 }
 
 function handleDeleteRequestConfirmation({
@@ -697,10 +874,111 @@ function findTaskById(tasks, id) {
 
 function findMatchingTasks(tasks, searchText) {
   const normalizedSearch = normalizeText(searchText)
+  const semanticTerms = getSemanticSearchTerms(normalizedSearch)
+  const preferredTimeOfDay = getSearchTimeOfDay(normalizedSearch)
+  const scoredTasks = tasks
+    .map((task) => ({
+      task,
+      score: getTaskMatchScore(task, normalizedSearch, {
+        semanticTerms,
+        preferredTimeOfDay,
+      }),
+    }))
+    .filter((result) => result.score > 0)
 
-  return tasks.filter((task) =>
-    normalizeText(task.title).includes(normalizedSearch),
+  if (scoredTasks.length === 0) {
+    return []
+  }
+
+  const bestScore = Math.max(...scoredTasks.map((result) => result.score))
+
+  return scoredTasks
+    .filter((result) => result.score === bestScore)
+    .map((result) => result.task)
+}
+
+function getTaskMatchScore(
+  task,
+  normalizedSearch,
+  { semanticTerms = [], preferredTimeOfDay = '' } = {},
+) {
+  const normalizedTitle = normalizeText(task.title)
+  const searchableText = normalizeSearchText(normalizedSearch)
+  const searchWords = searchableText
+    .split(' ')
+    .filter((word) => word.length > 2 && !isTimeContextWord(word))
+  let score = 0
+
+  if (normalizedTitle.includes(normalizedSearch)) {
+    score += 80
+  }
+
+  if (searchableText && normalizedTitle.includes(searchableText)) {
+    score += 70
+  }
+
+  semanticTerms.forEach((term) => {
+    if (normalizedTitle.includes(term)) {
+      score += 45
+    }
+  })
+
+  searchWords.forEach((word) => {
+    if (normalizedTitle.includes(word)) {
+      score += 12
+    }
+  })
+
+  if (score > 0 && preferredTimeOfDay) {
+    score += getTimeOfDay(task.time) === preferredTimeOfDay ? 18 : -6
+  }
+
+  return score
+}
+
+function getSemanticSearchTerms(normalizedSearch) {
+  const aliasGroups = [
+    {
+      triggers: ['workout', 'exercise', 'training'],
+      terms: ['gym', 'workout', 'exercise', 'training'],
+    },
+    {
+      triggers: ['linkedin', 'post', 'social'],
+      terms: ['linkedin post', 'linkedin', 'post', 'social'],
+    },
+    {
+      triggers: ['meeting', 'sync', 'call'],
+      terms: ['team sync', 'sync', 'meeting', 'call'],
+    },
+  ]
+
+  return Array.from(
+    new Set(
+      aliasGroups.flatMap((group) =>
+        group.triggers.some((trigger) => normalizedSearch.includes(trigger))
+          ? group.terms
+          : [],
+      ),
+    ),
   )
+}
+
+function getSearchTimeOfDay(normalizedSearch) {
+  return ['morning', 'afternoon', 'evening'].find((timeOfDay) =>
+    normalizedSearch.includes(timeOfDay),
+  ) || ''
+}
+
+function normalizeSearchText(text) {
+  return normalizeText(text)
+    .replace(/\b(my|the|a|an)\b/g, ' ')
+    .replace(/\b(morning|afternoon|evening)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function isTimeContextWord(word) {
+  return ['morning', 'afternoon', 'evening'].includes(word)
 }
 
 function isConfirmationAnswer(text) {
