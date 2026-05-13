@@ -713,12 +713,25 @@ function createTaskMatchFailureResponse(taskResult, searchText, tasks) {
   if (taskResult.matches.length > 1) {
     updateConversationContext({ lastReadResults: taskResult.matches })
     return `I found multiple matching tasks: ${joinWithAnd(
-      taskResult.matches.map((task) => task.title),
+      taskResult.matches.map(formatTaskForSpeech),
     )}. Which one did you mean?`
   }
 
   if (!taskResult.task) {
-    return `I could not find a task matching ${searchText}.`
+    if (taskResult.preferredTimeOfDay) {
+      const timeScopedTasks = filterTasks(tasks, {
+        timeOfDay: taskResult.preferredTimeOfDay,
+      })
+
+      if (timeScopedTasks.length > 0) {
+        updateConversationContext({ lastReadResults: timeScopedTasks })
+        return `I couldn't find a ${searchText} task. I found these ${taskResult.preferredTimeOfDay} tasks: ${joinWithAnd(
+          timeScopedTasks.map(formatTaskForSpeech),
+        )}.`
+      }
+    }
+
+    return `I couldn't find a task matching ${searchText}.`
   }
 
   return ''
@@ -780,7 +793,11 @@ function getTimeOfDay(time) {
     return 'afternoon'
   }
 
-  return 'evening'
+  if (hour >= 17 && hour < 24) {
+    return 'evening'
+  }
+
+  return ''
 }
 
 function getHourFromTime(time) {
@@ -794,6 +811,14 @@ function getHourFromTime(time) {
 
   let hour = Number(match[1])
   const meridiem = match[3]?.toLowerCase()
+
+  if (meridiem && (hour < 1 || hour > 12)) {
+    return null
+  }
+
+  if (!meridiem && (hour < 0 || hour > 23)) {
+    return null
+  }
 
   if (meridiem === 'pm' && hour < 12) {
     hour += 12
@@ -844,6 +869,7 @@ function resolveTaskReference(searchText, tasks, context) {
   return {
     task: matches.length === 1 ? matches[0] : null,
     matches,
+    preferredTimeOfDay: getSearchTimeOfDay(normalizedSearch),
   }
 }
 
@@ -851,6 +877,7 @@ function createTaskResult(task) {
   return {
     task,
     matches: task ? [task] : [],
+    preferredTimeOfDay: '',
   }
 }
 
@@ -877,13 +904,17 @@ function findMatchingTasks(tasks, searchText) {
   const semanticTerms = getSemanticSearchTerms(normalizedSearch)
   const preferredTimeOfDay = getSearchTimeOfDay(normalizedSearch)
   const scoredTasks = tasks
-    .map((task) => ({
-      task,
-      score: getTaskMatchScore(task, normalizedSearch, {
+    .map((task) => {
+      const matchScore = getTaskMatchScore(task, normalizedSearch, {
         semanticTerms,
         preferredTimeOfDay,
-      }),
-    }))
+      })
+
+      return {
+        task,
+        ...matchScore,
+      }
+    })
     .filter((result) => result.score > 0)
 
   if (scoredTasks.length === 0) {
@@ -891,10 +922,20 @@ function findMatchingTasks(tasks, searchText) {
   }
 
   const bestScore = Math.max(...scoredTasks.map((result) => result.score))
+  const bestMatches = scoredTasks.filter((result) => result.score === bestScore)
 
-  return scoredTasks
-    .filter((result) => result.score === bestScore)
-    .map((result) => result.task)
+  if (bestMatches.length === 1) {
+    return [bestMatches[0].task]
+  }
+
+  const strongestTitleScore = Math.max(
+    ...bestMatches.map((result) => result.titleScore),
+  )
+  const strongestTitleMatches = bestMatches.filter(
+    (result) => result.titleScore === strongestTitleScore,
+  )
+
+  return strongestTitleMatches.map((result) => result.task)
 }
 
 function getTaskMatchScore(
@@ -908,54 +949,67 @@ function getTaskMatchScore(
     .split(' ')
     .filter((word) => word.length > 2 && !isTimeContextWord(word))
   let score = 0
+  let titleScore = 0
 
   if (normalizedTitle.includes(normalizedSearch)) {
     score += 80
+    titleScore += 80
   }
 
   if (searchableText && normalizedTitle.includes(searchableText)) {
     score += 70
+    titleScore += 70
   }
 
   semanticTerms.forEach((term) => {
     if (normalizedTitle.includes(term)) {
-      score += 45
+      const semanticScore = term.includes(' ') ? 56 : 48
+      score += semanticScore
+      titleScore += semanticScore
     }
   })
 
   searchWords.forEach((word) => {
     if (normalizedTitle.includes(word)) {
       score += 12
+      titleScore += 12
     }
   })
 
   if (score > 0 && preferredTimeOfDay) {
-    score += getTimeOfDay(task.time) === preferredTimeOfDay ? 18 : -6
+    score += getTimeOfDay(task.time) === preferredTimeOfDay ? 40 : -12
   }
 
-  return score
+  return {
+    score,
+    titleScore,
+  }
 }
 
 function getSemanticSearchTerms(normalizedSearch) {
   const aliasGroups = [
     {
-      triggers: ['workout', 'exercise', 'training'],
-      terms: ['gym', 'workout', 'exercise', 'training'],
+      triggers: ['workout', 'exercise', 'training', 'fitness'],
+      terms: ['gym', 'workout', 'exercise', 'training', 'fitness'],
     },
     {
       triggers: ['linkedin', 'post', 'social'],
       terms: ['linkedin post', 'linkedin', 'post', 'social'],
     },
     {
-      triggers: ['meeting', 'sync', 'call'],
-      terms: ['team sync', 'sync', 'meeting', 'call'],
+      triggers: ['meeting', 'sync'],
+      terms: ['team sync', 'sync', 'meeting'],
+    },
+    {
+      triggers: ['call'],
+      terms: ['call'],
     },
   ]
 
   return Array.from(
     new Set(
       aliasGroups.flatMap((group) =>
-        group.triggers.some((trigger) => normalizedSearch.includes(trigger))
+        group.triggers.some((trigger) => hasSearchTerm(normalizedSearch, trigger))
           ? group.terms
           : [],
       ),
@@ -963,9 +1017,13 @@ function getSemanticSearchTerms(normalizedSearch) {
   )
 }
 
+function hasSearchTerm(text, term) {
+  return new RegExp(`\\b${term}\\b`).test(text)
+}
+
 function getSearchTimeOfDay(normalizedSearch) {
   return ['morning', 'afternoon', 'evening'].find((timeOfDay) =>
-    normalizedSearch.includes(timeOfDay),
+    hasSearchTerm(normalizedSearch, timeOfDay),
   ) || ''
 }
 
