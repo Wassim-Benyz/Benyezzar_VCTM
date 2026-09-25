@@ -1,7 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { TaskList } from '../tasks/TaskList'
 import { parseVoiceCommandWithAI } from '../../features/voice/aiVoiceParser'
-import { useTasks } from '../../hooks/useTasks'
+import { filterTasks as filterStoredTasks } from '../../features/tasks/taskSelectors'
+import { getAnalyticsVoiceResponse } from '../../features/analytics/analyticsVoice'
+import { DATE_RANGES, normalizeRangeId } from '../../features/analytics/dateRanges'
 import { useVoiceRecognition } from '../../hooks/useVoiceRecognition'
 import {
   clearPendingDeleteRequest,
@@ -13,11 +15,37 @@ import {
 } from '../../store/conversationContext'
 import { TranscriptPanel } from './TranscriptPanel'
 
-export function VoiceControl() {
-  const { tasks, refreshTasks, addTask, editTask, removeTask } = useTasks()
+export function VoiceControl({
+  compact = false,
+  onNavigate,
+  analyticsRangeId = 'last7',
+  onAnalyticsRangeChange,
+  taskManager,
+}) {
+  const {
+    tasks,
+    isLoading: isTaskLoading,
+    isSaving: isTaskSaving,
+    error: taskError,
+    refreshTasks,
+    addTask,
+    editTask,
+    removeTask,
+    completeTask,
+    reopenTask,
+    rescheduleTask,
+  } = taskManager
+  const [filters, setFilters] = useState({
+    search: '',
+    status: '',
+    category: '',
+    priority: '',
+    date: '',
+  })
   const [assistantMessage, setAssistantMessage] = useState(
     'Ready for a voice command.',
   )
+  const stopSpeakingRef = useRef(() => {})
 
   const handleFinalTranscript = useCallback(
     async (spokenText) => {
@@ -26,8 +54,15 @@ export function VoiceControl() {
       const pendingDeleteRequest = context.pendingDeleteRequest
       const pendingDeleteTask = context.pendingDeleteTask
 
+      if (commandIsStopReading(spokenText)) {
+        stopSpeakingRef.current()
+        response = 'Okay, I stopped reading.'
+        setAssistantMessage(response)
+        return response
+      }
+
       if (pendingDeleteRequest) {
-        response = handleDeleteRequestConfirmation({
+        response = await handleDeleteRequestConfirmation({
           spokenText,
           deleteRequest: pendingDeleteRequest,
           removeTask,
@@ -37,7 +72,7 @@ export function VoiceControl() {
       }
 
       if (pendingDeleteTask) {
-        response = handleDeleteConfirmation({
+        response = await handleDeleteConfirmation({
           spokenText,
           task: pendingDeleteTask,
           removeTask,
@@ -52,140 +87,183 @@ export function VoiceControl() {
         return response
       }
 
-      const command = await parseVoiceCommandWithAI(
-        spokenText,
-        getConversationContext(),
-      )
-      if (import.meta.env.DEV) {
-        console.log('[voice command]', {
-          intent: command.intent,
-          payload: command.payload,
-        })
-      }
-
-      if (command.intent === 'SMALL_TALK') {
-        response = createSmallTalkResponse(spokenText)
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'CREATE_TASK') {
-        const taskDetails = withDefaultDate(command.payload)
-        const task = addTask(taskDetails)
-        updateConversationContext({ lastCreatedTask: task })
-        response = `Sure, I created your task: ${formatTaskDetails(task)}.`
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'CREATE_MULTIPLE_TASKS') {
-        const createdTasks = command.payload.tasks.map((taskDetails) =>
-          addTask(withDefaultDate(taskDetails)),
-        )
-
-        updateConversationContext({
-          lastCreatedTask: createdTasks.at(-1),
-          lastReadResults: createdTasks,
-        })
-
-        response = createMultipleTasksResponse(createdTasks)
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'READ_TASKS') {
-        const storedTasks = refreshTasks()
-        const filteredTasks = filterTasks(storedTasks, command.payload)
-        updateConversationContext({ lastReadResults: filteredTasks })
-        response = createTasksSummary(filteredTasks, command.payload)
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'UPDATE_TASK') {
-        const storedTasks = refreshTasks()
-        const taskResult = resolveTaskReference(
-          command.payload.searchText,
-          storedTasks,
+      try {
+        const command = await parseVoiceCommandWithAI(
+          spokenText,
           getConversationContext(),
         )
-
-        const failureResponse = createTaskMatchFailureResponse(
-          taskResult,
-          command.payload.searchText,
-          storedTasks,
-        )
-
-        if (failureResponse) {
-          setAssistantMessage(failureResponse)
-          return failureResponse
+        if (import.meta.env.DEV) {
+          console.log('[voice command]', {
+            intent: command.intent,
+            payload: command.payload,
+          })
         }
 
-        const task = taskResult.task
-        const updates = withDefaultUpdateDate(command.payload.updates, task)
-        const updatedTask = editTask(task.id, updates)
-        if (!updatedTask) {
-          response = `I could not update ${task.title}.`
+        if (command.intent === 'SMALL_TALK') {
+          response = createSmallTalkResponse(spokenText)
           setAssistantMessage(response)
           return response
         }
 
-        updateConversationContext({ lastUpdatedTask: updatedTask })
-        response = createUpdateResponse(task, updates, updatedTask)
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'DELETE_MULTIPLE_TASKS') {
-        const storedTasks = refreshTasks()
-        const deleteRequestResult = createDeleteMultipleRequest(
-          command.payload,
-          storedTasks,
-        )
-
-        if (deleteRequestResult.message) {
-          response = deleteRequestResult.message
+        if (command.intent === 'OPEN_ANALYTICS') {
+          onNavigate?.('analytics')
+          response = 'Opening analytics.'
           setAssistantMessage(response)
           return response
         }
 
-        setPendingDeleteRequest(deleteRequestResult.deleteRequest)
-        response = createDeleteMultipleConfirmation(deleteRequestResult.deleteRequest)
-        setAssistantMessage(response)
-        return response
-      }
-
-      if (command.intent === 'DELETE_TASK') {
-        const storedTasks = refreshTasks()
-        const taskResult = resolveTaskReference(
-          command.payload.searchText,
-          storedTasks,
-          getConversationContext(),
-        )
-
-        const failureResponse = createTaskMatchFailureResponse(
-          taskResult,
-          command.payload.searchText,
-          storedTasks,
-        )
-
-        if (failureResponse) {
-          setAssistantMessage(failureResponse)
-          return failureResponse
+        if (command.intent === 'OPEN_TASK_MANAGER') {
+          onNavigate?.('tasks')
+          response = 'Going back to the task manager.'
+          setAssistantMessage(response)
+          return response
         }
 
-        const task = taskResult.task
-        setPendingDeleteTask(task)
-        response = `Do you want me to delete ${task.title}? Say yes to confirm or no to cancel.`
+        if (command.intent === 'SET_ANALYTICS_RANGE') {
+          onAnalyticsRangeChange?.(command.payload.rangeId)
+          response = `Showing ${getAnalyticsRangeLabel(command.payload.rangeId).toLowerCase()}.`
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'ANALYTICS_QUERY') {
+          if (command.payload.rangeId) {
+            onAnalyticsRangeChange?.(command.payload.rangeId)
+          }
+          const storedTasks = await refreshTasks()
+          response = getAnalyticsVoiceResponse({
+            query: command.payload.query,
+            tasks: storedTasks,
+            rangeId: command.payload.rangeId || analyticsRangeId,
+          })
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'CREATE_TASK') {
+          const taskDetails = withDefaultDate(command.payload)
+          const task = await addTask(taskDetails, 'voice')
+          updateConversationContext({ lastCreatedTask: task })
+          response = `Sure, I created your task: ${formatTaskDetails(task)}.`
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'CREATE_MULTIPLE_TASKS') {
+          const createdTasks = []
+
+          for (const taskDetails of command.payload.tasks) {
+            createdTasks.push(await addTask(withDefaultDate(taskDetails), 'voice'))
+          }
+
+          updateConversationContext({
+            lastCreatedTask: createdTasks.at(-1),
+            lastReadResults: createdTasks,
+          })
+
+          response = createMultipleTasksResponse(createdTasks)
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'READ_TASKS') {
+          const storedTasks = await refreshTasks()
+          const filteredTasks = filterTasks(storedTasks, command.payload)
+          updateConversationContext({ lastReadResults: filteredTasks })
+          response = createTasksSummary(filteredTasks, command.payload)
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'UPDATE_TASK') {
+          const storedTasks = await refreshTasks()
+          const taskResult = resolveTaskReference(
+            command.payload.searchText,
+            storedTasks,
+            getConversationContext(),
+          )
+
+          const failureResponse = createTaskMatchFailureResponse(
+            taskResult,
+            command.payload.searchText,
+            storedTasks,
+          )
+
+          if (failureResponse) {
+            setAssistantMessage(failureResponse)
+            return failureResponse
+          }
+
+          const task = taskResult.task
+          const updates = withDefaultUpdateDate(command.payload.updates, task)
+          const updatedTask = await editTask(task.id, updates, 'voice')
+          if (!updatedTask) {
+            response = `I could not update ${task.title}.`
+            setAssistantMessage(response)
+            return response
+          }
+
+          updateConversationContext({ lastUpdatedTask: updatedTask })
+          response = createUpdateResponse(task, updates, updatedTask)
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'DELETE_MULTIPLE_TASKS') {
+          const storedTasks = await refreshTasks()
+          const deleteRequestResult = createDeleteMultipleRequest(
+            command.payload,
+            storedTasks,
+          )
+
+          if (deleteRequestResult.message) {
+            response = deleteRequestResult.message
+            setAssistantMessage(response)
+            return response
+          }
+
+          setPendingDeleteRequest(deleteRequestResult.deleteRequest)
+          response = createDeleteMultipleConfirmation(deleteRequestResult.deleteRequest)
+          setAssistantMessage(response)
+          return response
+        }
+
+        if (command.intent === 'DELETE_TASK') {
+          const storedTasks = await refreshTasks()
+          const taskResult = resolveTaskReference(
+            command.payload.searchText,
+            storedTasks,
+            getConversationContext(),
+          )
+
+          const failureResponse = createTaskMatchFailureResponse(
+            taskResult,
+            command.payload.searchText,
+            storedTasks,
+          )
+
+          if (failureResponse) {
+            setAssistantMessage(failureResponse)
+            return failureResponse
+          }
+
+          const task = taskResult.task
+          setPendingDeleteTask(task)
+          response = `Do you want me to delete ${task.title}? Say yes to confirm or no to cancel.`
+          setAssistantMessage(response)
+          return response
+        }
+
+        response = command.message || 'Please rephrase that command.'
+        setAssistantMessage(response)
+        return response
+      } catch (requestError) {
+        response = createTaskApiFailureResponse(requestError)
         setAssistantMessage(response)
         return response
       }
-
-      response = command.message || 'Please rephrase that command.'
-      setAssistantMessage(response)
-      return response
     },
-    [addTask, editTask, refreshTasks, removeTask],
+    [addTask, analyticsRangeId, editTask, onAnalyticsRangeChange, onNavigate, refreshTasks, removeTask],
   )
 
   const handleRecognitionError = useCallback((recognitionError) => {
@@ -200,7 +278,7 @@ export function VoiceControl() {
     isThinking,
     isSpeaking,
     isSupported,
-    error,
+    error: recognitionError,
     startListening,
     stopListening,
     stopSpeaking,
@@ -209,10 +287,87 @@ export function VoiceControl() {
     onFinalTranscript: handleFinalTranscript,
     onRecognitionError: handleRecognitionError,
   })
+  useEffect(() => {
+    stopSpeakingRef.current = stopSpeaking
+  }, [stopSpeaking])
   const voiceStatus = getVoiceStatus({ isListening, isThinking, isSpeaking })
+  const visibleTasks = filterStoredTasks(tasks, filters)
+
+  const handleFilterChange = (updates) => {
+    setFilters((currentFilters) => ({ ...currentFilters, ...updates }))
+  }
+
+  const handleDelete = async (task) => {
+    if (window.confirm(`Delete "${task.title}"?`)) {
+      try {
+        await removeTask(task.id, 'visual')
+      } catch (requestError) {
+        setAssistantMessage(createTaskApiFailureResponse(requestError))
+      }
+    }
+  }
+
+  const handleReschedule = async (task) => {
+    const value = window.prompt('Enter a new date and time (YYYY-MM-DDTHH:MM):', task.scheduledAt?.slice(0, 16) || '')
+    if (!value) return
+    const scheduledAt = new Date(value)
+    if (!Number.isNaN(scheduledAt.getTime())) {
+      try {
+        await rescheduleTask(task.id, scheduledAt.toISOString(), 'visual')
+      } catch (requestError) {
+        setAssistantMessage(createTaskApiFailureResponse(requestError))
+      }
+    }
+  }
+  const systemError = taskError || recognitionError
+
+  if (compact) {
+    return (
+      <section className="analytics-voice-panel" aria-label="Analytics voice assistant">
+        <div className="analytics-voice-copy">
+          <div className="card-kicker">Voice assistant</div>
+          <h2>Ask about your analytics</h2>
+          <p>Ask for a metric, a date range, or an observed pattern.</p>
+        </div>
+        <div className="analytics-voice-controls">
+          <button
+            type="button"
+            className="analytics-mic-button"
+            onClick={isListening ? stopListening : startListening}
+            disabled={!isSupported || isTaskLoading || isTaskSaving}
+            aria-label={isListening ? 'Stop listening' : 'Start listening'}
+            aria-pressed={isListening}
+          >
+            {isListening ? 'Stop' : 'Speak'}
+          </button>
+          <span className="orb-status">
+            <span className={`status-dot ${voiceStatus.className}`}></span>
+            {voiceStatus.label}
+          </span>
+          <button type="button" onClick={resetTranscript} disabled={!transcript}>
+            Clear transcript
+          </button>
+          <button type="button" onClick={stopSpeaking} aria-label="Stop speaking" title="Stop speaking">
+            Stop reading
+          </button>
+        </div>
+        <div className="analytics-voice-feedback">
+          <div>
+            <div className="card-kicker">Transcript</div>
+            <p>{transcript || 'No speech captured yet.'}</p>
+          </div>
+          <div>
+            <div className="card-kicker">Assistant response</div>
+            <p>{assistantMessage}</p>
+          </div>
+        </div>
+        {systemError ? <p className="system-alert" role="alert">{systemError}</p> : null}
+      </section>
+    )
+  }
 
   return (
-    <main className="voice-dashboard">
+    <main className={`voice-dashboard${compact ? ' voice-dashboard-compact' : ''}`}>
       <section className="dashboard-hero" aria-label="Voice assistant controls">
         <div className="hero-copy">
           <div className="eyebrow">Benyezzar VC</div>
@@ -238,7 +393,7 @@ export function VoiceControl() {
               type="button"
               className="mic-button"
               onClick={isListening ? stopListening : startListening}
-              disabled={!isSupported}
+              disabled={!isSupported || isTaskLoading || isTaskSaving}
               aria-label={isListening ? 'Stop listening' : 'Start listening'}
               aria-pressed={isListening}
             >
@@ -273,7 +428,7 @@ export function VoiceControl() {
           </button>
         </div>
 
-        {error ? <p className="system-alert" role="alert">{error}</p> : null}
+        {systemError ? <p className="system-alert" role="alert">{systemError}</p> : null}
       </section>
 
       <section className="dashboard-grid">
@@ -286,7 +441,20 @@ export function VoiceControl() {
           </section>
         </div>
 
-        <TaskList tasks={tasks} />
+        <TaskList
+          tasks={visibleTasks}
+          filters={filters}
+          onFilterChange={handleFilterChange}
+          onClearFilters={() => setFilters({ search: '', status: '', category: '', priority: '', date: '' })}
+          onComplete={completeTask}
+          onReopen={reopenTask}
+          onEdit={editTask}
+          onReschedule={handleReschedule}
+          onDelete={handleDelete}
+          isLoading={isTaskLoading}
+          isBusy={isTaskSaving}
+          error={taskError}
+        />
       </section>
 
       <section className="glass-card command-card" aria-label="Command examples">
@@ -306,7 +474,7 @@ export function VoiceControl() {
   )
 }
 
-function handleDeleteConfirmation({
+async function handleDeleteConfirmation({
   spokenText,
   task,
   removeTask,
@@ -314,7 +482,13 @@ function handleDeleteConfirmation({
   const answer = normalizeConfirmationText(spokenText)
 
   if (['yes', 'yeah', 'confirm', 'delete it', 'delete'].includes(answer)) {
-    const wasDeleted = removeTask(task.id)
+    let wasDeleted
+    try {
+      wasDeleted = await removeTask(task.id, 'voice')
+    } catch (requestError) {
+      clearPendingDeleteTask()
+      return createTaskApiFailureResponse(requestError)
+    }
 
     if (!wasDeleted) {
       clearPendingDeleteTask()
@@ -381,6 +555,17 @@ function withDefaultDate(taskDetails = {}) {
     ...taskDetails,
     date: taskDetails.date || 'today',
   }
+}
+
+function commandIsStopReading(text) {
+  return /^(stop|cancel|quiet|be quiet)(\s+(reading|speaking))?$/i.test(
+    String(text || '').trim(),
+  )
+}
+
+function getAnalyticsRangeLabel(rangeId) {
+  const normalizedRangeId = normalizeRangeId(rangeId)
+  return DATE_RANGES.find((range) => range.id === normalizedRangeId).label
 }
 
 function withDefaultUpdateDate(updates = {}, task = {}) {
@@ -493,7 +678,7 @@ function formatScheduleDestination(updates = {}) {
   return updates.date || updates.time || ''
 }
 
-function handleDeleteRequestConfirmation({
+async function handleDeleteRequestConfirmation({
   spokenText,
   deleteRequest,
   removeTask,
@@ -517,7 +702,18 @@ function handleDeleteRequestConfirmation({
     )}, or no to cancel.`
   }
 
-  const deletedTasks = deleteRequest.tasks.filter((task) => removeTask(task.id))
+  const deletedTasks = []
+
+  for (const task of deleteRequest.tasks) {
+    try {
+      if (await removeTask(task.id, 'voice')) {
+        deletedTasks.push(task)
+      }
+    } catch {
+      clearPendingDeleteRequest()
+      return `I could not delete ${task.title}.`
+    }
+  }
 
   clearPendingDeleteRequest()
 
@@ -703,6 +899,11 @@ function createRecognitionErrorResponse(error) {
   }
 
   return 'I had trouble with speech recognition. Please try again.'
+}
+
+function createTaskApiFailureResponse(error) {
+  const message = error?.message || 'The task backend is unavailable.'
+  return `I could not save that change. ${message}`
 }
 
 function createTaskMatchFailureResponse(taskResult, searchText, tasks) {

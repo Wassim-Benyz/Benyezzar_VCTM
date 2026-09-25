@@ -20,6 +20,11 @@ const LOOSE_TIME_PATTERN = /\b(\d{1,2}(:\d{2})?\s?(am|pm))\b/i
 const BARE_TIME_PATTERN = /^(\d{1,2}(:\d{2})?\s?(am|pm)?)$/i
 const DATE_PATTERN =
   /\b(today|tomorrow|on\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)|on\s+\d{1,2}\/\d{1,2}(\/\d{2,4})?)\b/i
+const ANALYTICS_RANGE_PATTERNS = [
+  { rangeId: 'last7', pattern: /(?:last|past|previous)\s+7\s+days?|seven\s+days?/i },
+  { rangeId: 'last30', pattern: /(?:last|past|previous)\s+30\s+days?|thirty\s+days?/i },
+  { rangeId: 'all', pattern: /(?:all\s+time|everything)/i },
+]
 
 export function parseVoiceCommand(transcript) {
   const text = stripPolitePhrases(normalizeTranscript(transcript))
@@ -32,6 +37,12 @@ export function parseVoiceCommand(transcript) {
 
   if (smallTalkCommand) {
     return smallTalkCommand
+  }
+
+  const analyticsCommand = parseAnalyticsCommand(text)
+
+  if (analyticsCommand) {
+    return analyticsCommand
   }
 
   const readCommand = parseReadTasks(text)
@@ -71,6 +82,39 @@ export function parseVoiceCommand(transcript) {
   }
 
   return unknownCommand()
+}
+
+function parseAnalyticsCommand(text) {
+  if (/^(open|show|go to|view)\s+(the\s+)?analytics?$|^analytics?$/i.test(text)) {
+    return { intent: 'OPEN_ANALYTICS', payload: {} }
+  }
+
+  if (/^(go back|return|open|go to|show)\s+(?:to\s+)?(the\s+)?task manager$|^tasks?$/i.test(text)) {
+    return { intent: 'OPEN_TASK_MANAGER', payload: {} }
+  }
+
+  if (/^(stop|cancel|quiet|be quiet)(\s+(reading|speaking))?$/i.test(text)) {
+    return { intent: 'STOP_READING', payload: {} }
+  }
+
+  const range = ANALYTICS_RANGE_PATTERNS.find(({ pattern }) => pattern.test(text))
+  const asksForRange = /^(show|use|set|filter|give me)\b/i.test(text)
+  if (range && asksForRange) {
+    return { intent: 'SET_ANALYTICS_RANGE', payload: { rangeId: range.rangeId } }
+  }
+
+  const rangeId = range?.rangeId
+  if (/completion\s+rate|rate\s+of\s+completion/i.test(text)) return analyticsQuery('COMPLETION_RATE', rangeId)
+  if (/how many\s+tasks?.*(complete|finished)|tasks?.*(complete|finished).*how many/i.test(text)) return analyticsQuery('COMPLETED_COUNT', rangeId)
+  if (/which day|what day|day.*most.*completion/i.test(text)) return analyticsQuery('TOP_COMPLETION_DAY', rangeId)
+  if (/when do i|what time|time.*complete|usually complete/i.test(text)) return analyticsQuery('TOP_COMPLETION_TIME', rangeId)
+  if (/\b(read|tell me|what are|show me)\b.*observed patterns/i.test(text)) return analyticsQuery('OBSERVED_PATTERNS', rangeId)
+
+  return null
+}
+
+function analyticsQuery(query, rangeId) {
+  return { intent: 'ANALYTICS_QUERY', payload: { query, ...(rangeId ? { rangeId } : {}) } }
 }
 
 function parseSmallTalk(text) {

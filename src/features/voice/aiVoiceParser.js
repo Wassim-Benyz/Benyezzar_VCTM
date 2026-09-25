@@ -35,6 +35,11 @@ function isValidCommand(command) {
     'CREATE_MULTIPLE_TASKS',
     'DELETE_MULTIPLE_TASKS',
     'SMALL_TALK',
+    'OPEN_ANALYTICS',
+    'OPEN_TASK_MANAGER',
+    'SET_ANALYTICS_RANGE',
+    'ANALYTICS_QUERY',
+    'STOP_READING',
     'UNKNOWN',
   ]
 

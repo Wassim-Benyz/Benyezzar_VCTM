@@ -1,14 +1,14 @@
 import { useState } from 'react'
-import { loginDemoUser, signupDemoUser } from '../../services/demoAuth'
+import { loginUser, registerUser } from '../../services/authApi'
 
-export function AuthScreen({ onAuthenticated }) {
+export function AuthScreen({ initialError = '', onAuthenticated }) {
   const [mode, setMode] = useState('login')
   const [form, setForm] = useState({
     name: '',
     email: '',
     password: '',
   })
-  const [error, setError] = useState('')
+  const [error, setError] = useState(initialError)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const isSignup = mode === 'signup'
 
@@ -25,18 +25,17 @@ export function AuthScreen({ onAuthenticated }) {
     setIsSubmitting(true)
     setError('')
 
-    const result = isSignup
-      ? await signupDemoUser(form)
-      : await loginDemoUser(form)
+    try {
+      const result = isSignup
+        ? await registerUser(form)
+        : await loginUser(form)
 
-    setIsSubmitting(false)
-
-    if (result.error) {
-      setError(result.error)
-      return
+      onAuthenticated(result.user)
+    } catch (requestError) {
+      setError(requestError.message || 'Authentication failed.')
+    } finally {
+      setIsSubmitting(false)
     }
-
-    onAuthenticated(result.session)
   }
 
   const switchMode = () => {
@@ -46,14 +45,11 @@ export function AuthScreen({ onAuthenticated }) {
 
   return (
     <main className="auth-shell">
-      <section className="glass-card auth-card" aria-label="Demo authentication">
+      <section className="glass-card auth-card" aria-label="Authentication">
         <div>
-          <div className="card-kicker">Demo Access</div>
-          <h1>{isSignup ? 'Create Demo Account' : 'Login'}</h1>
-          <p>
-            This local-only gate stores demo account and session data in your
-            browser.
-          </p>
+          <div className="card-kicker">{isSignup ? 'Create account' : 'Sign in'}</div>
+          <h1>{isSignup ? 'Create account' : 'Sign in'}</h1>
+          <p>Use your email and password to access your tasks.</p>
         </div>
 
         <form className="auth-form" onSubmit={handleSubmit}>
@@ -101,8 +97,8 @@ export function AuthScreen({ onAuthenticated }) {
 
         <button className="auth-link" type="button" onClick={switchMode}>
           {isSignup
-            ? 'Already have a demo account? Log in'
-            : 'Need a demo account? Sign up'}
+            ? 'Already have an account? Sign in'
+            : 'Need an account? Create one'}
         </button>
       </section>
     </main>

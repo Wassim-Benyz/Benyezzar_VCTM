@@ -6,6 +6,11 @@ const VALID_INTENTS = new Set([
   'CREATE_MULTIPLE_TASKS',
   'DELETE_MULTIPLE_TASKS',
   'SMALL_TALK',
+  'OPEN_ANALYTICS',
+  'OPEN_TASK_MANAGER',
+  'SET_ANALYTICS_RANGE',
+  'ANALYTICS_QUERY',
+  'STOP_READING',
   'UNKNOWN',
 ])
 
@@ -69,7 +74,7 @@ export async function parseCommandWithGroq({
   context,
   env = process.env,
 }) {
-  const model = env.GROQ_MODEL || 'llama-3.1-8b-instant'
+  const model = env.GROQ_MODEL || 'openai/gpt-oss-20b'
   const apiUrl = createGroqApiUrl(env)
   logGroqConfig(env)
 
@@ -163,7 +168,7 @@ export function logGroqConfig(env = process.env) {
     hasGroqApiKey: Boolean(env.GROQ_API_KEY),
     GROQ_API_URL:
       env.GROQ_API_URL || 'https://api.groq.com/openai/v1/chat/completions',
-    GROQ_MODEL: env.GROQ_MODEL || 'llama-3.1-8b-instant',
+    GROQ_MODEL: env.GROQ_MODEL || 'openai/gpt-oss-20b',
   })
 }
 
@@ -222,7 +227,8 @@ function createSystemPrompt() {
   return [
     'Convert voice transcripts into task manager commands.',
     'Return JSON only. Do not return markdown or explanations.',
-    'Valid intents: CREATE_TASK, READ_TASKS, UPDATE_TASK, DELETE_TASK, CREATE_MULTIPLE_TASKS, DELETE_MULTIPLE_TASKS, SMALL_TALK, UNKNOWN.',
+    'Valid intents: CREATE_TASK, READ_TASKS, UPDATE_TASK, DELETE_TASK, CREATE_MULTIPLE_TASKS, DELETE_MULTIPLE_TASKS, SMALL_TALK, OPEN_ANALYTICS, OPEN_TASK_MANAGER, SET_ANALYTICS_RANGE, ANALYTICS_QUERY, STOP_READING, UNKNOWN.',
+    'Use OPEN_ANALYTICS or OPEN_TASK_MANAGER for navigation. Use SET_ANALYTICS_RANGE with rangeId last7, last30, or all. Use ANALYTICS_QUERY with query COMPLETION_RATE, COMPLETED_COUNT, TOP_COMPLETION_DAY, TOP_COMPLETION_TIME, or OBSERVED_PATTERNS. Use STOP_READING when asked to stop speaking.',
     'CREATE_TASK payload: { "title": string, "date": string, "time": string }.',
     'CREATE_MULTIPLE_TASKS payload: { "tasks": [{ "title": string, "date": string, "time": string }] }.',
     'READ_TASKS payload: { "dateFilter": "today" | "tomorrow" | "", "timeOfDay": "morning" | "afternoon" | "evening" | "" }.',

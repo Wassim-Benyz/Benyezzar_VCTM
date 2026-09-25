@@ -130,7 +130,7 @@ Create a `.env` file in the project root:
 
 ```env
 GROQ_API_KEY=your_groq_api_key
-GROQ_MODEL=llama-3.1-8b-instant
+GROQ_MODEL=openai/gpt-oss-20b
 
 CARTESIA_API_KEY=your_cartesia_api_key
 CARTESIA_VOICE_ID=your_cartesia_voice_id
